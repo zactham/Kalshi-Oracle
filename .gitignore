@@ -123,3 +123,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+oracle_proposals.csv
+oracle_ai_viz.png
+oracle_existing_markets.csv

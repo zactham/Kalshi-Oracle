@@ -1,0 +1,15 @@
+# Enhanced Oracle Bot Requirements
+# Install with: pip install -r requirements.txt
+
+streamlit>=1.50.0
+feedparser>=6.0.12
+pandas>=2.2.3
+matplotlib>=3.9.4
+transformers>=4.57.1
+# kalshi-py>=2.0.6.6  # Official Kalshi SDK - uncomment for production use
+python-dotenv>=1.0.1
+pillow>=11.3.0
+scipy>=1.13.1
+regex>=2025.10.22
+openai>=2.6.0
+requests>=2.32.5
