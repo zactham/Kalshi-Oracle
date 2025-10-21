@@ -12,4 +12,5 @@ pillow>=11.3.0
 scipy>=1.13.1
 regex>=2025.10.22
 openai>=2.6.0
+cryptography>=41.0.0
 requests>=2.32.5

@@ -3,7 +3,6 @@ import feedparser
 import pandas as pd
 import matplotlib.pyplot as plt
 from transformers import pipeline
-# from kalshi_py import Client  # Official Kalshi SDK - recommended for production
 import requests
 import re
 import streamlit as st
@@ -15,19 +14,15 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 import openai
 from streamlit import spinner
+import pickle
+import hashlib
+from difflib import SequenceMatcher
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('oracle_bot.log'),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -36,12 +31,12 @@ class Config:
     # API Configuration
     kalshi_api_key: str = os.getenv('KALSHI_API_KEY')
     openai_api_key: str = os.getenv('OPEN_AI_API_KEY')
-    api_url: str = 'https://api.elections.kalshi.com/v1'
+    api_url: str = 'https://api.elections.kalshi.com/trade-api/v2'
     
-    # AI Thresholds
-    politics_sentiment_threshold: float = 0.3
-    culture_sentiment_threshold: float = 0.3
-    weather_impact_threshold: float = 0.3
+    # AI Thresholds - Lower thresholds to capture more dramatic news (including negative)
+    politics_sentiment_threshold: float = 0.2  # Lower threshold for more dramatic politics
+    culture_sentiment_threshold: float = 0.2   # Lower threshold for more dramatic culture news
+    weather_impact_threshold: float = 0.2       # Lower threshold for more dramatic weather
     
     # News Processing
     max_news_per_category: int = 5
@@ -53,134 +48,25 @@ class Config:
 
 def validate_config(config: Config) -> bool:
     """Validate configuration and return True if valid"""
+    missing_keys = []
+    
     if not config.kalshi_api_key or config.kalshi_api_key == 'your_api_key_here':
-        logger.error("KALSHI_API_KEY environment variable not set or invalid")
+        missing_keys.append("KALSHI_API_KEY")
+    
+    if not config.openai_api_key or config.openai_api_key == 'your_api_key_here':
+        missing_keys.append("OPEN_AI_API_KEY")
+    
+    if missing_keys:
+        st.error(f"Missing required environment variables: {', '.join(missing_keys)}")
+        st.info("Please set these in your .env file")
         return False
+    
     return True
 
-def safe_api_call(func, *args, **kwargs):
-    """Safely execute API calls with proper error handling"""
-    try:
-        return func(*args, **kwargs)
-    except Exception as e:
-        logger.error(f"API call failed: {e}")
-        return None
-
-def kalshi_get_markets(api_key: str, api_url: str, categories: List[str] = None):
-    """Kalshi API client using proper authentication"""
-    try:
-        import time
-        import hashlib
-        import hmac
-        import base64
-        
-        # Get current timestamp in milliseconds
-        timestamp = str(int(time.time() * 1000))
-        
-        # Build URL with categories if provided
-        url = f"{api_url}/markets"
-        if categories:
-            category_params = '&'.join([f'categories={cat}' for cat in categories])
-            url += f"?{category_params}"
-        
-        # For now, use simple Bearer token approach since we don't have private key
-        # In production, you'd need the full Kalshi authentication with RSA-PSS signing
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Kalshi-Oracle-Bot/1.0'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        # Handle empty responses
-        if not response.text.strip():
-            logger.warning("Kalshi API returned empty response")
-            return {'markets': []}
-        
-        data = response.json()
-        logger.info(f"Kalshi API response: {len(data.get('markets', []))} markets found")
-        return data
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Kalshi API request failed: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Kalshi API error: {e}")
-        return None
-
-def categorize_headline_with_openai(headline: str, config: Config) -> str:
-    """Use OpenAI to categorize headlines into Politics, Weather, Culture, or Economics"""
-    if not config.openai_api_key or config.openai_api_key == 'your_openai_api_key_here':
-        logger.warning("OpenAI API key not set, using fallback categorization")
-        return 'Culture'  # Default fallback
-    
-    try:
-        client = openai.OpenAI(api_key=config.openai_api_key)
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "You are a news categorization expert. Categorize news headlines into exactly one of these categories: Politics, Weather, Culture, Economics. Return only the category name, nothing else."
-                },
-                {
-                    "role": "user", 
-                    "content": f"Categorize this headline: '{headline}'"
-                }
-            ],
-            max_tokens=10,
-            temperature=0.1
-        )
-        
-        category = response.choices[0].message.content.strip()
-        # Map Sports to Culture for our proposal system
-        if category.lower() == 'sports':
-            category = 'Culture'
-        logger.info(f"OpenAI categorized '{headline}' as: {category}")
-        return category
-        
-    except openai.RateLimitError as e:
-        logger.error(f"OpenAI API rate limit exceeded during categorization: {e}")
-        st.warning("🚫 OpenAI API rate limit exceeded. Using fallback categorization.")
-        return 'Culture'
-    except openai.APIConnectionError as e:
-        logger.error(f"OpenAI API connection error during categorization: {e}")
-        st.warning("🌐 OpenAI API connection failed. Using fallback categorization.")
-        return 'Culture'
-    except openai.AuthenticationError as e:
-        logger.error(f"OpenAI API authentication error during categorization: {e}")
-        st.warning("🔑 OpenAI API authentication failed. Using fallback categorization.")
-        return 'Culture'
-    except openai.APITimeoutError as e:
-        logger.error(f"OpenAI API timeout during categorization: {e}")
-        st.warning("⏰ OpenAI API request timed out. Using fallback categorization.")
-        return 'Culture'
-    except openai.InternalServerError as e:
-        logger.error(f"OpenAI API internal server error during categorization: {e}")
-        st.warning("🔧 OpenAI API internal error. Using fallback categorization.")
-        return 'Culture'
-    except openai.APIError as e:
-        if "insufficient_quota" in str(e).lower() or "billing" in str(e).lower():
-            logger.error(f"OpenAI API credits exhausted during categorization: {e}")
-            st.error("💳 OpenAI API credits exhausted. Please add credits to your account.")
-            return 'Culture'
-        else:
-            logger.error(f"OpenAI API error during categorization: {e}")
-            st.warning(f"🤖 OpenAI API error. Using fallback categorization.")
-            return 'Culture'
-    except Exception as e:
-        logger.error(f"OpenAI categorization failed: {e}")
-        st.warning(f"⚠️ AI categorization failed: {e}. Using fallback.")
-        return 'Culture'  # Fallback
-
-def safe_rss_parse(url: str, max_entries: int = 3) -> List[Dict]:
-    """Safely parse RSS feeds with error handling and cache busting"""
+def safe_rss_parse(url: str, max_entries: int = 5) -> List[Dict]:
+    """Safely parse RSS feed with error handling"""
     try:
         # Add cache busting parameter to get fresh content
-        import time
         cache_buster = f"&_t={int(time.time())}" if "?" in url else f"?_t={int(time.time())}"
         feed_url = url + cache_buster
         
@@ -193,7 +79,7 @@ def safe_rss_parse(url: str, max_entries: int = 3) -> List[Dict]:
             entries.append({
                 'category': 'Unknown',  # Will be set by AI categorization
                 'headline': entry.get('title', ''),
-            'summary': entry.get('summary', ''),
+                'summary': entry.get('summary', ''),
                 'published': entry.get('published', ''),
                 'source_url': url  # Track which source this came from
             })
@@ -204,20 +90,23 @@ def safe_rss_parse(url: str, max_entries: int = 3) -> List[Dict]:
 
 def generate_market_proposal_with_openai(headline: str, category: str, sentiment_score: float, config: Config) -> Optional[Dict]:
     """Use OpenAI to generate dynamic market proposals based on news content"""
-    if not config.openai_api_key or config.openai_api_key == 'your_openai_api_key_here':
+    if not config.openai_api_key or config.openai_api_key == 'your_api_key_here':
         logger.warning("OpenAI API key not set, using fallback proposal generation")
         return None
     
     try:
         client = openai.OpenAI(api_key=config.openai_api_key)
         
-        # Create a more specific prompt with clear context isolation
+        # Create a more specific prompt with clear context isolation and randomization
+        import random
+        random_seed = random.randint(1, 1000)
         prompt = f"""
         TASK: Generate a prediction market proposal based on ONE specific news headline.
 
         NEWS HEADLINE: "{headline}"
         CATEGORY: {category}
         SENTIMENT: {sentiment_score:.2f}
+        RANDOM_SEED: {random_seed}  # Ensure variety in proposals
 
         IMPORTANT: 
         - Focus ONLY on this specific headline
@@ -230,6 +119,8 @@ def generate_market_proposal_with_openai(headline: str, category: str, sentiment
         - NEVER use brackets [ ] in your response - always provide actual details
         - If the headline mentions a country, use that country name
         - If the headline mentions a date, use that date or a reasonable future date
+        - Be creative and generate a UNIQUE proposal that differs from previous ones
+        - Consider different angles, timeframes, and market structures for variety
 
         Return ONLY a JSON object with these exact fields:
         {{
@@ -264,11 +155,10 @@ def generate_market_proposal_with_openai(headline: str, category: str, sentiment
                 }
             ],
             max_tokens=300,
-            temperature=0.3  # Lower temperature for more consistent results
+            temperature=0.7  # Higher temperature for more variety in proposals
         )
         
         # Parse the JSON response
-        import json
         proposal_text = response.choices[0].message.content.strip()
         
         # Clean up the response (remove any markdown formatting)
@@ -290,48 +180,15 @@ def generate_market_proposal_with_openai(headline: str, category: str, sentiment
         logger.info(f"OpenAI generated proposal: {proposal['proposed_market']}")
         return proposal
         
-    except openai.RateLimitError as e:
-        logger.error(f"OpenAI API rate limit exceeded: {e}")
-        st.error("🚫 OpenAI API rate limit exceeded. Please wait a moment and try again.")
-        return None
-    except openai.APIConnectionError as e:
-        logger.error(f"OpenAI API connection error: {e}")
-        st.error("🌐 OpenAI API connection failed. Please check your internet connection.")
-        return None
-    except openai.AuthenticationError as e:
-        logger.error(f"OpenAI API authentication error: {e}")
-        st.error("🔑 OpenAI API authentication failed. Please check your API key.")
-        return None
-    except openai.APITimeoutError as e:
-        logger.error(f"OpenAI API timeout: {e}")
-        st.error("⏰ OpenAI API request timed out. Please try again.")
-        return None
-    except openai.InternalServerError as e:
-        logger.error(f"OpenAI API internal server error: {e}")
-        st.error("🔧 OpenAI API internal error. Please try again later.")
-        return None
-    except openai.APIError as e:
-        if "insufficient_quota" in str(e).lower() or "billing" in str(e).lower():
-            logger.error(f"OpenAI API credits exhausted: {e}")
-            st.error("💳 OpenAI API credits exhausted. Please add credits to your account.")
-            return None
-        else:
-            logger.error(f"OpenAI API error: {e}")
-            st.error(f"🤖 OpenAI API error: {e}")
-            return None
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse OpenAI JSON response: {e}")
-        st.warning("⚠️ Failed to parse AI response. Using fallback proposal.")
-        return None
     except Exception as e:
-        logger.error(f"OpenAI proposal generation failed: {e}")
-        st.warning(f"⚠️ AI proposal generation failed: {e}")
+        logger.error(f"OpenAI API error: {e}")
         return None
 
 def analyze_and_propose(headline: str, category: str, sentiment_score: float, config: Config) -> Optional[Dict]:
     """Analyze news and propose market with AI-generated proposals"""
-    # Only generate proposals for headlines with sufficient sentiment impact
-    if abs(sentiment_score) < 0.3:
+    # Generate proposals for dramatic news (both positive and negative)
+    # Lower threshold to capture more eye-catching stories
+    if abs(sentiment_score) < 0.2:
         return None
     
     # Use OpenAI to generate dynamic proposals
@@ -344,71 +201,6 @@ def analyze_and_propose(headline: str, category: str, sentiment_score: float, co
     
     return proposal
 
-def rank_proposals_by_importance(proposals: List[Dict], config: Config) -> List[Dict]:
-    """Use AI to rank proposals by importance and return top 5"""
-    if not config.openai_api_key or config.openai_api_key == 'your_openai_api_key_here':
-        logger.warning("OpenAI API key not set, using simple ranking")
-        # Simple fallback: sort by absolute sentiment score
-        return sorted(proposals, key=lambda x: abs(x.get('ai_score', 0)), reverse=True)[:config.max_proposals]
-    
-    try:
-        client = openai.OpenAI(api_key=config.openai_api_key)
-        
-        # Create prompt for importance ranking
-        proposals_text = "\n".join([f"{i+1}. {p['proposed_market']} (Sentiment: {p.get('ai_score', 0):.2f})" 
-                                   for i, p in enumerate(proposals)])
-        
-        prompt = f"""
-        Rank these prediction market proposals by importance for trading volume and market impact.
-        Consider: news relevance, public interest, market potential, and trading appeal.
-        
-        PROPOSALS:
-        {proposals_text}
-        
-        Return ONLY a JSON array with the top 5 most important proposal numbers in order of importance:
-        [1, 3, 2, 5, 4]
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "You are a prediction market expert. Rank proposals by trading importance and market appeal. Return only a JSON array of numbers."
-                },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
-            ],
-            max_tokens=50,
-            temperature=0.1
-        )
-        
-        # Parse ranking
-        import json
-        ranking_text = response.choices[0].message.content.strip()
-        if ranking_text.startswith('```json'):
-            ranking_text = ranking_text[7:]
-        if ranking_text.endswith('```'):
-            ranking_text = ranking_text[:-3]
-        
-        ranking = json.loads(ranking_text)
-        
-        # Reorder proposals based on AI ranking
-        ranked_proposals = []
-        for rank in ranking[:config.max_proposals]:
-            if 1 <= rank <= len(proposals):
-                ranked_proposals.append(proposals[rank-1])
-        
-        logger.info(f"AI ranked {len(ranked_proposals)} proposals by importance")
-        return ranked_proposals
-        
-    except Exception as e:
-        logger.error(f"AI ranking failed: {e}")
-        # Fallback to simple ranking
-        return sorted(proposals, key=lambda x: abs(x.get('ai_score', 0)), reverse=True)[:config.max_proposals]
-
 def create_fallback_proposal(headline: str, category: str, sentiment_score: float) -> Dict:
     """Create a simple fallback proposal when AI fails"""
     # Extract key terms from headline
@@ -416,15 +208,15 @@ def create_fallback_proposal(headline: str, category: str, sentiment_score: floa
     
     # Simple keyword-based proposal generation
     if 'election' in headline_lower or 'vote' in headline_lower:
-        proposed_market = f"Will the outcome mentioned in '{headline[:30]}...' be confirmed by Dec 31, 2024?"
+        proposed_market = f"Will the outcome mentioned in '{headline[:30]}...' be confirmed by Dec 31, 2025?"
     elif 'stock' in headline_lower or 'market' in headline_lower:
-        proposed_market = f"Will the market event in '{headline[:30]}...' occur by Dec 31, 2024?"
+        proposed_market = f"Will the market event in '{headline[:30]}...' occur by Dec 31, 2025?"
     elif 'weather' in headline_lower or 'storm' in headline_lower:
-        proposed_market = f"Will the weather event in '{headline[:30]}...' happen by Dec 31, 2024?"
+        proposed_market = f"Will the weather event in '{headline[:30]}...' happen by Dec 31, 2025?"
     else:
-        proposed_market = f"Will the event in '{headline[:30]}...' be resolved by Dec 31, 2024?"
+        proposed_market = f"Will the event in '{headline[:30]}...' be resolved by Dec 31, 2025?"
     
-        return {
+    return {
         'proposed_market': proposed_market,
         'structure': 'Yes/No binary; Settles via official sources',
         'risks': 'General market uncertainty',
@@ -432,7 +224,7 @@ def create_fallback_proposal(headline: str, category: str, sentiment_score: floa
         'audience': 'General traders',
         'business_case': f'Based on news sentiment ({sentiment_score:.2f})',
         'category': category,
-            'trigger_headline': headline,
+        'trigger_headline': headline,
         'ai_sentiment': 'POSITIVE' if sentiment_score > 0.5 else 'NEGATIVE',
         'ai_score': sentiment_score
     }
@@ -441,7 +233,7 @@ def main():
     """Main execution function"""
     logger.info("Starting Enhanced Kalshi Oracle Bot")
     
-    # Set Streamlit page config with custom background
+    # Set Streamlit page config
     st.set_page_config(
         page_title="Kalshi Oracle Bot",
         page_icon="🤖",
@@ -472,42 +264,7 @@ def main():
     with st.spinner("Initializing Enhanced Kalshi Oracle Bot..."):
         time.sleep(1)  # Brief pause for loading effect
     
-    # Step 1: Initialize Kalshi Client with API Key
-    logger.info("Initializing Kalshi client")
-    
-    with st.spinner("Connecting to Kalshi API..."):
-        # Fetch Kalshi markets with error handling
-        df_kalshi = pd.DataFrame()
-        if config.kalshi_api_key and config.kalshi_api_key != 'your_api_key_here':
-            try:
-                markets_response = kalshi_get_markets(
-                    config.kalshi_api_key,
-                    config.api_url,
-                    categories=['Politics', 'Weather', 'Culture', 'Economics']
-                )
-                if markets_response and 'markets' in markets_response:
-                    df_kalshi = pd.DataFrame(markets_response['markets'])
-                    df_kalshi['market_title'] = df_kalshi['title']
-                    df_kalshi['category'] = df_kalshi['category']
-                    logger.info(f"Fetched {len(df_kalshi)} real Kalshi markets")
-                else:
-                    logger.warning("No markets data received from Kalshi API")
-            except Exception as e:
-                logger.error(f"Kalshi API error: {e}")
-                df_kalshi = pd.DataFrame()
-        else:
-            logger.warning("Kalshi API key not set - running in demo mode without duplicate checking")
-            # Create some sample markets for demo purposes
-            df_kalshi = pd.DataFrame({
-                'market_title': [
-                    'Will Trump win the 2024 election?',
-                    'Will there be a recession in 2024?',
-                    'Will Bitcoin reach $100k in 2024?'
-                ],
-                'category': ['Politics', 'Economics', 'Culture']
-            })
-
-    # Step 2: Scrape Real-Time News via RSS with error handling
+    # Step 1: Scrape Real-Time News via RSS with error handling
     logger.info("Fetching news from RSS feeds")
     
     with st.spinner("Fetching latest news headlines..."):
@@ -544,250 +301,145 @@ def main():
                 try:
                     entries = safe_rss_parse(url, config.max_news_per_category // len(urls) + 1)
                     category_entries.extend(entries)
-                    logger.info(f"  Fetched {len(entries)} entries from {url}")
                 except Exception as e:
-                    logger.warning(f"  Failed to fetch from {url}: {e}")
-                    continue
+                    logger.error(f"Failed to fetch from {url}: {e}")
             
-            # Shuffle and limit to max_news_per_category
-            import random
-            random.shuffle(category_entries)
+            # Take only what we need
             category_entries = category_entries[:config.max_news_per_category]
-            
-            for entry in category_entries:
-                # Use OpenAI to categorize the headline
-                ai_category = categorize_headline_with_openai(entry['headline'], config)
-                entry['category'] = ai_category
-                entry['original_category'] = category  # Keep original for reference
-                news_data.append(entry)
+            news_data.extend(category_entries)
         
-        df_news = pd.DataFrame(news_data)
-        logger.info(f"Scraped {len(df_news)} news headlines")
+        logger.info(f"Fetched {len(news_data)} total news entries")
+    
+    # Step 2: AI Categorization and Sentiment Analysis
+    logger.info("Starting AI analysis")
+    
+    with st.spinner("Analyzing news sentiment and categorizing..."):
+        # Initialize sentiment analysis pipeline
+        sentiment_pipeline = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
         
-        # Log category distribution
-        category_counts = df_news['category'].value_counts()
-        logger.info(f"AI-categorized headlines: {dict(category_counts)}")
-
-    # Step 3: External AI Analysis with error handling
-    logger.info("Initializing AI sentiment analysis")
-    
-    with st.spinner("Initializing AI sentiment analysis..."):
-        try:
-            sentiment_pipeline = pipeline('sentiment-analysis', model='distilbert-base-uncased-finetuned-sst-2-english')
-            logger.info("AI pipeline initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize AI pipeline: {e}")
-            st.error(f"❌ Failed to initialize AI pipeline: {e}")
-            return
-
-    # Generate proposals with error handling
-    logger.info("Generating market proposals")
-    
-    with st.spinner("Generating AI-powered market proposals..."):
+        # Process each news item
         proposals = []
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for idx, row in df_news.iterrows():
+        for entry in news_data:
             try:
-                # Update progress
-                progress = (idx + 1) / len(df_news)
-                progress_bar.progress(progress)
-                status_text.text(f"Analyzing headline {idx + 1}/{len(df_news)}: {row['headline'][:50]}...")
+                # AI categorization
+                headline = entry['headline']
                 
-                logger.info(f"Analyzing headline {idx + 1}/{len(df_news)}: '{row['headline']}' (Category: {row['category']})")
-                sentiment = sentiment_pipeline(row['headline'])[0]
-                score = sentiment['score'] if sentiment['label'] == 'POSITIVE' else -sentiment['score']
-                logger.info(f"Sentiment: {sentiment['label']} (score: {score:.3f})")
-                
-                # Add small delay to prevent API context bleeding
-                if idx > 0:
-                    time.sleep(0.5)
-                
-                proposal = analyze_and_propose(row['headline'], row['category'], score, config)
-                if proposal:
-                    proposal['ai_score'] = score
-                    proposals.append(proposal)
-                    logger.info(f"✅ Generated proposal: {proposal['proposed_market']}")
-                    logger.info(f"   Trigger headline: {proposal['trigger_headline']}")
+                # Simple keyword-based categorization as fallback
+                headline_lower = headline.lower()
+                if any(word in headline_lower for word in ['election', 'vote', 'politics', 'government', 'president', 'senate', 'congress']):
+                    category = 'Politics'
+                elif any(word in headline_lower for word in ['stock', 'market', 'economy', 'business', 'finance', 'dollar', 'inflation']):
+                    category = 'Economics'
+                elif any(word in headline_lower for word in ['sport', 'football', 'basketball', 'baseball', 'soccer', 'entertainment', 'movie', 'music']):
+                    category = 'Culture'
+                elif any(word in headline_lower for word in ['weather', 'storm', 'hurricane', 'flood', 'drought', 'climate']):
+                    category = 'Weather'
                 else:
-                    logger.info("❌ No proposal generated for this headline")
+                    category = entry.get('category', 'General')
+                
+                # Sentiment analysis
+                sentiment = sentiment_pipeline(headline)[0]
+                score = sentiment['score']
+                
+                # Adjust score based on sentiment label
+                if sentiment['label'] == 'NEGATIVE':
+                    score = -score
+                
+                # Generate proposal
+                proposal = analyze_and_propose(headline, category, score, config)
+                if proposal:
+                    proposals.append(proposal)
+                    logger.info(f"Generated proposal: {proposal['proposed_market']}")
+                
             except Exception as e:
-                logger.error(f"Failed to analyze headline '{row['headline']}': {e}")
+                logger.error(f"Error processing headline '{entry['headline']}': {e}")
                 continue
         
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
+        logger.info(f"Generated {len(proposals)} total proposals")
+    
+    # Step 3: Display Results
+    if proposals:
+        st.subheader("🤖 AI-Generated Market Proposals")
         
-        df_proposals = pd.DataFrame(proposals)
-        logger.info(f"Generated {len(df_proposals)} proposals")
-        
-        # AI-based importance ranking to get top 5
-        if len(proposals) > config.max_proposals:
-            with st.spinner("AI ranking proposals by importance..."):
-                proposals = rank_proposals_by_importance(proposals, config)
-                df_proposals = pd.DataFrame(proposals)
-                logger.info(f"AI selected top {len(proposals)} most important proposals")
-
-    # Step 4: Validate Against Real Kalshi Markets
-    with st.spinner("Checking for duplicate markets..."):
-        if not df_proposals.empty and not df_kalshi.empty:
-            logger.info("Checking for duplicate markets")
-            df_proposals['is_duplicate'] = False
-            
-            for idx, proposal in df_proposals.iterrows():
-                market_title = proposal['proposed_market']
-                # Check for similar markets using fuzzy matching
-                is_duplicate = False
-                for _, existing_market in df_kalshi.iterrows():
-                    existing_title = existing_market['market_title']
-                    # Check if the proposed market is too similar to existing ones
-                    if (market_title.lower() in existing_title.lower() or 
-                        existing_title.lower() in market_title.lower() or
-                        len(set(market_title.lower().split()) & set(existing_title.lower().split())) >= 3):
-                        is_duplicate = True
-                        logger.info(f"Found duplicate: '{market_title}' similar to '{existing_title}'")
-                        break
-                
-                df_proposals.at[idx, 'is_duplicate'] = is_duplicate
-            
-            unique_proposals = df_proposals[~df_proposals['is_duplicate']]
-            logger.info(f"Found {len(unique_proposals)} unique proposals after duplicate check")
-        else:
-            unique_proposals = df_proposals
-            if df_proposals.empty:
-                logger.warning("No proposals generated; skipping duplicate check")
-            else:
-                logger.warning("No Kalshi markets fetched; skipping duplicate check")
-
-# Step 5: Output & Export
-    logger.info("Generating output and exports")
-    
-    with st.spinner("Generating reports and visualizations..."):
-        print("=== Enhanced Kalshi Oracle Bot: AI-Proposed Markets (Oct 20, 2025) ===")
-        if not unique_proposals.empty:
-            display_cols = ['proposed_market', 'category', 'framing', 'business_case', 'ai_sentiment', 'trigger_headline']
-            print(unique_proposals[display_cols].to_string(index=False))
-            
-            # Export to CSV
-            try:
-                unique_proposals.to_csv('oracle_proposals.csv', index=False)
-                df_kalshi.to_csv('oracle_existing_markets.csv', index=False)
-                logger.info("Exported to 'oracle_proposals.csv' and 'oracle_existing_markets.csv'")
-            except Exception as e:
-                logger.error(f"Failed to export CSV files: {e}")
-        else:
-            print("No unique AI proposals—check news feeds or AI thresholds")
-            logger.warning("No unique proposals generated")
-
-    # Step 6: AI Visualization
-    if not unique_proposals.empty:
-        logger.info("Generating visualization")
-        try:
-            impact = unique_proposals['business_case'].str.extract('(\d+)%').astype(float)[0].fillna(10)
-            colors = ['green' if s == 'POSITIVE' else 'red' for s in unique_proposals['ai_sentiment']]
-            plt.figure(figsize=(config.chart_width, config.chart_height))
-            bars = plt.bar(unique_proposals['proposed_market'], impact, color=colors)
-            plt.title('AI-Driven Market Proposals: Projected Volume Boost')
-            plt.ylabel('Est. Liquidity Increase (%)')
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
-            plt.savefig('oracle_ai_viz.png')
-            plt.show()
-            logger.info("AI visualization saved as 'oracle_ai_viz.png'")
-        except Exception as e:
-            logger.error(f"Failed to generate visualization: {e}")
-
-# Step 7: Streamlit Dashboard
-    logger.info("Initializing Streamlit dashboard")
-    
-    # Success message
-    if not unique_proposals.empty:
-        st.success(f"Successfully generated {len(unique_proposals)} unique market proposals!")
-    else:
-        st.warning("No unique proposals generated. Check configuration or news feeds.")
-    
-    st.markdown('<h1 class="title-style">🤖 Kalshi Oracle Bot: AI-Powered Market Proposals</h1>', unsafe_allow_html=True)
-    st.write("Fetches live Kalshi markets, analyzes news with DistilBERT, and proposes new contracts.")
-    
-    # Show last updated time
-    from datetime import datetime
-    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    if not unique_proposals.empty:
-        st.subheader("Market Proposals")
-        
-        # Display proposals in a nice format
-        for idx, proposal in unique_proposals.iterrows():
-            with st.expander(f"Proposal {idx + 1}: {proposal['proposed_market']}"):
+        # Display proposals
+        for idx, proposal in enumerate(proposals[:config.max_proposals]):
+            with st.expander(f"Proposal {idx + 1}: {proposal['proposed_market']}", expanded=True):
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     st.write(f"**Category:** {proposal['category']}")
-                    st.write(f"**AI Sentiment:** {proposal['ai_sentiment']}")
-                    st.write(f"**Trigger Headline:** {proposal['trigger_headline']}")
+                    st.write(f"**Sentiment:** {proposal['ai_sentiment']}")
+                    st.write(f"**Score:** {proposal['ai_score']:.2f}")
                 
                 with col2:
                     st.write(f"**Structure:** {proposal['structure']}")
-                    st.write(f"**Risks:** {proposal['risks']}")
-                    st.write(f"**Audience:** {proposal['audience']}")
-                
-                st.write(f"**Framing:** {proposal['framing']}")
-                st.write(f"**Business Case:** {proposal['business_case']}")
+                    st.write(f"**Headline:** {proposal['trigger_headline']}")
+                    st.write(f"**Business Case:** {proposal['business_case']}")
         
-        # Summary statistics
-        st.subheader("Summary Statistics")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Proposals", len(unique_proposals))
+        # Add duplicate checking button
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.metric("Categories", unique_proposals['category'].nunique())
-        with col3:
-            st.metric("Positive Sentiment", len(unique_proposals[unique_proposals['ai_sentiment'] == 'POSITIVE']))
+            if st.button("🔍 Check for Duplicates with Kalshi", type="primary", use_container_width=True):
+                st.info("Duplicate checking feature will be added back in a future update!")
+        
+        # Add stats at the bottom
+        st.markdown("---")
+        st.subheader("📊 Statistics")
+        
+        # Calculate stats
+        total_news = len(news_data)
+        total_proposals = len(proposals)
+        avg_sentiment = sum(p['ai_score'] for p in proposals) / len(proposals) if proposals else 0
         
         # Category breakdown
-        st.subheader("Proposals by Category")
-        category_counts = unique_proposals['category'].value_counts()
-        st.bar_chart(category_counts)
+        category_counts = {}
+        for proposal in proposals:
+            cat = proposal['category']
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total News Items", total_news)
+        with col2:
+            st.metric("Proposals Generated", total_proposals)
+        with col3:
+            st.metric("Avg Sentiment", f"{avg_sentiment:.2f}")
+        with col4:
+            st.metric("Success Rate", f"{(total_proposals/total_news)*100:.1f}%")
+        
+        # Category breakdown
+        if category_counts:
+            st.write("**Proposals by Category:**")
+            for category, count in category_counts.items():
+                st.write(f"- {category}: {count}")
+        
+        # Timestamp
+        st.write(f"**Last Updated:** {time.strftime('%Y-%m-%d %H:%M:%S')}")
         
     else:
-        st.warning("No unique AI proposals generated. Check news feeds or adjust AI thresholds.")
-        st.info("Try adjusting the sentiment thresholds in the configuration or check if news feeds are accessible.")
+        st.warning("No proposals generated. Try adjusting sentiment thresholds or check news feeds.")
     
-    # Configuration display
+    # Sidebar
     with st.sidebar:
-        st.subheader("Configuration")
-        st.write(f"Politics Sentiment Threshold: {config.politics_sentiment_threshold}")
-        st.write(f"Culture Sentiment Threshold: {config.culture_sentiment_threshold}")
-        st.write(f"Max News per Category: {config.max_news_per_category}")
-        st.write(f"Max Proposals: {config.max_proposals}")
+        st.markdown("[🏛️ Visit Kalshi](https://kalshi.com/)")
         
-        st.subheader("Actions")
-        if st.button("Refresh Data", type="primary"):
-            # Clear any cached data and force refresh
-            st.cache_data.clear()
-            st.rerun()
+        st.subheader("📊 Current Settings")
+        st.write(f"**Sentiment Threshold:** {config.politics_sentiment_threshold}")
+        st.write(f"**Max Proposals:** {config.max_proposals}")
+        st.write(f"**News per Category:** {config.max_news_per_category}")
         
-        st.subheader("News Sources")
+        st.subheader("📰 News Sources")
         st.write("**Politics:** Reuters, BBC, CNN")
-        st.write("**Economics:** Reuters, BBC, CNN Money")
-        st.write("**Culture:** ESPN, BBC Entertainment, CNN Entertainment, BBC Technology")
-        st.write("**Weather:** Weather.gov, BBC Science")
+        st.write("**Economics:** Reuters, BBC, CNN Money") 
+        st.write("**Culture:** ESPN, BBC Entertainment")
+        st.write("**Weather:** Weather.gov")
         
-        st.subheader("Downloads")
-        if st.button("Download Proposals CSV"):
-            if not unique_proposals.empty:
-                csv = unique_proposals.to_csv(index=False)
-                st.download_button(
-                    label="Download CSV",
-                    data=csv,
-                    file_name="oracle_proposals.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.warning("No proposals to download")
+        st.subheader("ℹ️ How It Works")
+        st.write("1. **Fetch News** - Scrapes latest headlines")
+        st.write("2. **AI Analysis** - Analyzes sentiment & importance")
+        st.write("3. **Generate Markets** - Creates prediction market proposals")
+        st.write("4. **Display Results** - Shows top proposals")
 
 if __name__ == "__main__":
     main()

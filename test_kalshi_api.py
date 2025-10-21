@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from enhanced_oracle_bot import kalshi_get_markets, Config
+from enhanced_oracle_bot import get_optimized_markets, Config
 
 def test_kalshi_api():
     """Test the Kalshi API integration"""
@@ -26,10 +26,15 @@ def test_kalshi_api():
     
     # Test API call
     print("\n📡 Testing API call...")
-    response = kalshi_get_markets(
+    private_key_path = os.getenv('KALSHI_PRIVATE_KEY_PATH', 'kalshi-private-key.pem')
+    print(f"🔐 Private key path: {private_key_path}")
+    print(f"📁 Key file exists: {os.path.exists(private_key_path)}")
+    
+    response = get_optimized_markets(
         config.kalshi_api_key,
         config.api_url,
-        categories=['Politics', 'Weather', 'Culture', 'Economics']
+        private_key_path=private_key_path,
+        config=config
     )
     
     if response:

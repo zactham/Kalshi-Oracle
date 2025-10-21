@@ -126,3 +126,5 @@ dmypy.json
 oracle_proposals.csv
 oracle_ai_viz.png
 oracle_existing_markets.csv
+kalshi-private-key.pem
+kalshi_markets_cache.pkl

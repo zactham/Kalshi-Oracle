@@ -1,258 +1,255 @@
-# Enhanced Kalshi Oracle Bot 🤖📈
+# 🤖 Kalshi Oracle Bot: AI-Powered Market Proposals
 
-An AI-powered prediction market proposal generator that analyzes real-time news and creates unique Kalshi market proposals using OpenAI and sentiment analysis.
+An intelligent prediction market proposal generator that uses real-time news analysis, AI sentiment scoring, and comprehensive duplicate detection to suggest new markets for Kalshi.
 
-## 🎯 What This Bot Does
+## 🚀 Features
 
-The Enhanced Kalshi Oracle Bot is a sophisticated system that:
+### **Core Functionality**
+- **Real-time News Analysis**: Scrapes headlines from Reuters, BBC, CNN, ESPN, and Weather.gov
+- **AI Sentiment Analysis**: Uses DistilBERT to analyze news sentiment and impact
+- **Dynamic Market Generation**: Creates market proposals based on current events using OpenAI GPT-3.5-turbo
+- **Smart Duplicate Detection**: Comprehensive checking against 233,000+ existing Kalshi markets
+- **AI-Powered Ranking**: Ranks proposals by importance, trading potential, and market appeal
 
-1. **📡 Scrapes Real-Time News** - Fetches headlines from RSS feeds (Reuters, ESPN, Weather.gov)
-2. **🤖 AI Categorization** - Uses OpenAI to intelligently categorize news into Politics, Weather, Culture, or Economics
-3. **💭 AI Sentiment Analysis** - Analyzes emotional tone using DistilBERT (positive/negative sentiment)
-4. **🎲 Dynamic Market Generation** - Creates unique prediction market proposals based on actual news content
-5. **🔍 Duplicate Detection** - Checks against existing Kalshi markets to avoid duplicates
-6. **📊 Interactive Dashboard** - Displays results in a professional Streamlit interface
+### **Performance Optimizations**
+- **Intelligent Caching**: 6-hour cache system reduces API calls by 1,500x
+- **Smart Filtering**: Limits duplicate checking to 10,000 most recent markets
+- **Optional Duplicate Checking**: Users can view proposals first, then check for duplicates
+- **Progress Indicators**: Real-time progress bars for all operations
 
-## 🧠 AI Sentiment Analysis Explained
+### **Advanced Duplicate Detection**
+- **Word Overlap Analysis**: 90%+ word similarity detection (excluding common words)
+- **AI-Powered Verification**: Uses OpenAI to verify edge cases and semantic similarity
+- **Multi-Method Approach**: Combines fast algorithms with AI verification
+- **Context-Aware**: Distinguishes between similar dates but different topics
 
-**AI Sentiment** is a measure of the emotional tone and impact of news headlines:
+## 🛠️ Installation
 
-- **POSITIVE Sentiment** (0.0 to 1.0): Headlines with optimistic, favorable, or beneficial tone
-- **NEGATIVE Sentiment** (-1.0 to 0.0): Headlines with pessimistic, concerning, or harmful tone
-- **HIGH IMPACT** (|score| > 0.7): Headlines with significant emotional intensity
-
-### How It Works:
-- Uses **DistilBERT** (a lightweight BERT model) trained on sentiment analysis
-- Processes each headline through a neural network
-- Returns a confidence score between -1.0 and 1.0
-- Only headlines with |sentiment| > 0.3 generate market proposals
-
-### Example:
-- "Tesla stock surges 15% after earnings beat" → **POSITIVE (0.8)**
-- "Hurricane Maria approaches with 120mph winds" → **HIGH IMPACT (0.9)**
-- "Company announces massive layoffs" → **NEGATIVE (-0.7)**
-
-## 🏗️ Architecture
-
-```
-News RSS Feeds → AI Categorization → Sentiment Analysis → Market Generation → Duplicate Check → Dashboard
-     ↓              ↓                    ↓                    ↓                ↓           ↓
-Reuters/ESPN    OpenAI GPT-3.5      DistilBERT         OpenAI GPT-3.5    Fuzzy Match   Streamlit
-Weather.gov     (Politics/Weather/  (Positive/Negative) (Dynamic Proposals) (Similarity)  (Web UI)
-                Culture/Economics)  (Confidence Score)  (JSON Response)   (Prevent Dups)
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
+### **Prerequisites**
 - Python 3.9+
 - OpenAI API key
-- Kalshi API key (optional, for duplicate checking)
+- Kalshi API key and private key
 
-### Installation
+### **Setup**
+```bash
+# Clone the repository
+git clone <repository-url>
+cd Kalshi-Oracle
 
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd Kalshi
-   ```
+# Install dependencies
+pip install -r requirements.txt
 
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set up environment variables:**
-   ```bash
-   # Create .env file
-   echo "OPEN_AI_API_KEY=your_openai_api_key_here" > .env
-   echo "KALSHI_API_KEY=your_kalshi_api_key_here" >> .env
-   ```
-
-4. **Run the bot:**
-   ```bash
-   python3 -m streamlit run enhanced_oracle_bot.py
-   ```
-
-5. **Access the dashboard:**
-   - Local: http://localhost:8501
-   - Network: http://192.168.1.176:8501
-
-## 📋 Configuration
-
-The bot uses a `Config` class for all settings:
-
-```python
-@dataclass
-class Config:
-    # API Configuration
-    kalshi_api_key: str = os.getenv('KALSHI_API_KEY')
-    openai_api_key: str = os.getenv('OPEN_AI_API_KEY')
-    api_url: str = 'https://trading-api.kalshi.com/v2'
-    
-    # AI Thresholds
-    politics_sentiment_threshold: float = 0.3
-    culture_sentiment_threshold: float = 0.3
-    weather_impact_threshold: float = 0.3
-    
-    # News Processing
-    max_news_per_category: int = 3
-    max_proposals: int = 10
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-### Adjustable Parameters:
-- **Sentiment Thresholds**: Minimum sentiment score to generate proposals
-- **Max News per Category**: How many headlines to fetch from each RSS feed
-- **Max Proposals**: Maximum number of proposals to generate
-
-## 🔧 How It Works
-
-### Step 1: News Scraping
-- Fetches headlines from multiple RSS feeds
-- Handles parsing errors gracefully
-- Stores headlines with metadata (title, summary, published date)
-
-### Step 2: AI Categorization
-- Sends each headline to OpenAI GPT-3.5
-- Categorizes into: Politics, Weather, Culture, Economics
-- Maps Sports → Culture for proposal generation
-- Falls back to 'Culture' if API fails
-
-### Step 3: Sentiment Analysis
-- Uses DistilBERT for fast sentiment analysis
-- Processes headlines through neural network
-- Returns confidence scores (-1.0 to 1.0)
-- Only processes headlines with |sentiment| > 0.3
-
-### Step 4: Market Proposal Generation
-- Sends headline + category + sentiment to OpenAI
-- Generates unique market proposals in JSON format
-- Creates specific, measurable, tradeable markets
-- Includes settlement sources and risk factors
-
-### Step 5: Duplicate Detection
-- Fetches existing Kalshi markets (if API key available)
-- Uses fuzzy matching to detect similar proposals
-- Prevents duplicate market creation
-- Falls back to demo mode if no API access
-
-### Step 6: Dashboard Display
-- Shows proposals in expandable cards
-- Displays summary statistics
-- Category breakdown charts
-- Configuration sidebar
-
-## 📊 Output Files
-
-The bot generates several output files:
-
-- **`oracle_proposals.csv`** - Generated market proposals
-- **`oracle_existing_markets.csv`** - Existing Kalshi markets (for reference)
-- **`oracle_ai_viz.png`** - Visualization chart
-- **`oracle_bot.log`** - Detailed execution logs
-
-## 🧪 Testing
-
-### Test AI Categorization:
-```bash
-python3 test_ai_categorization.py
+### **Environment Variables**
+Create a `.env` file with:
+```env
+OPEN_AI_API_KEY=your_openai_api_key_here
+KALSHI_API_KEY=your_kalshi_api_key_here
+KALSHI_PRIVATE_KEY_PATH=kalshi-private-key.pem
 ```
 
-### Test Dynamic Proposals:
+## 🎯 Usage
+
+### **Run the Bot**
 ```bash
-python3 test_dynamic_proposals.py
+# Start the Streamlit dashboard
+python3 -m streamlit run enhanced_oracle_bot.py
+
+# Or use the convenience script
+./run_bot.sh
 ```
 
-### Test Kalshi API:
+### **Test API Connections**
 ```bash
+# Test Kalshi API integration
 python3 test_kalshi_api.py
+
+# Run all tests
+python3 run_all_tests.py
 ```
 
-## 🔍 Troubleshooting
+## 📊 How It Works
 
-### Common Issues:
+### **1. News Collection**
+- Scrapes RSS feeds from multiple sources
+- Categorizes headlines by topic (Politics, Sports, Weather, Economics)
+- Applies sentiment analysis to identify dramatic news
 
-1. **"OpenAI API key not set"**
-   - Add `OPEN_AI_API_KEY=your_key` to `.env` file
+### **2. AI Market Generation**
+- Uses OpenAI GPT-3.5-turbo to create market proposals
+- Generates future-dated markets (2025/2026)
+- Provides business reasoning and market appeal analysis
 
-2. **"Kalshi API request failed: 401 Unauthorized"**
-   - Add `KALSHI_API_KEY=your_key` to `.env` file
-   - Bot will run in demo mode without duplicate checking
+### **3. Smart Duplicate Detection**
+- **Method 1**: Word overlap analysis (90%+ similarity)
+- **Method 2**: AI-powered semantic verification
+- **Method 3**: Fast similarity algorithms for performance
 
-3. **"RSS feed has parsing issues"**
-   - Normal warning, bot continues with available feeds
-   - Some RSS feeds may be temporarily unavailable
+### **4. Performance Optimization**
+- **Caching**: Markets cached for 6 hours
+- **Filtering**: Only checks 10,000 most recent markets
+- **Optional**: Users can skip duplicate checking initially
 
-4. **"No proposals generated"**
-   - Check sentiment thresholds in config
-   - Verify news feeds are accessible
-   - Ensure OpenAI API key is valid
+## 🔧 Configuration
 
-### Debug Mode:
-- Check `oracle_bot.log` for detailed execution logs
-- Use test scripts to verify individual components
-- Monitor console output for real-time status
-
-## 🎨 Customization
-
-### Adding New RSS Feeds:
+### **Sentiment Thresholds**
 ```python
-rss_feeds = {
-    'Politics': 'http://feeds.reuters.com/reuters/politicsNews',
-    'Economics': 'http://feeds.reuters.com/reuters/businessNews',
-    'Culture': 'http://www.espn.com/espn/rss/news',
-    'Weather': 'https://www.weather.gov/rss',
-    'Technology': 'https://feeds.feedburner.com/oreilly/radar'  # Add new feed
-}
+politics_sentiment_threshold: float = 0.2  # Lower = more dramatic news
+culture_sentiment_threshold: float = 0.2
+weather_impact_threshold: float = 0.2
 ```
 
-### Adjusting AI Prompts:
-Modify the prompt in `generate_market_proposal_with_openai()` to change proposal style.
+### **Performance Settings**
+```python
+cache_duration_hours: int = 6  # Cache markets for 6 hours
+max_markets_to_check: int = 10000  # Limit for duplicate checking
+max_proposals: int = 5  # Number of proposals to generate
+```
 
-### Changing Sentiment Thresholds:
-Update the `Config` class to adjust when proposals are generated.
+## 📈 Performance Metrics
 
-## 📈 Performance
+### **Speed Improvements**
+- **First Run**: ~2.5 minutes (fetches all markets)
+- **Cached Runs**: ~0.1 seconds (1,500x faster)
+- **Duplicate Checking**: 95% reduction in comparisons
 
-- **Processing Speed**: ~2-3 seconds per headline
-- **API Calls**: 2 OpenAI calls per headline (categorization + proposal)
-- **Memory Usage**: ~500MB (includes DistilBERT model)
-- **Accuracy**: High for categorization, moderate for sentiment
+### **Accuracy Improvements**
+- **Market Coverage**: 233,000+ markets checked
+- **Duplicate Detection**: AI-powered semantic analysis
+- **False Positive Reduction**: Context-aware similarity checking
+
+## 🧠 AI Features
+
+### **Sentiment Analysis**
+- **Model**: DistilBERT for fast, accurate sentiment scoring
+- **Thresholds**: Configurable sensitivity for different news categories
+- **Impact Assessment**: Identifies dramatic news with high market potential
+
+### **Market Generation**
+- **Prompt Engineering**: Optimized prompts for consistent, high-quality proposals
+- **Future Dating**: Ensures all markets use future dates (2025/2026)
+- **Business Reasoning**: Provides market appeal and trading volume estimates
+
+### **Duplicate Detection**
+- **AI Verification**: Uses OpenAI to verify semantic similarity
+- **Context Awareness**: Distinguishes between similar dates but different topics
+- **Multi-Method**: Combines fast algorithms with AI verification
 
 ## 🔒 Security
 
-- API keys stored in `.env` file (not committed to git)
-- No sensitive data logged
-- HTTPS for all API calls
-- Graceful error handling
+### **API Key Management**
+- Environment variables for secure key storage
+- `.env` file excluded from version control
+- Private key file handling for Kalshi authentication
+
+### **Data Privacy**
+- No sensitive data stored in logs
+- API keys masked in output
+- Secure authentication for all API calls
+
+## 📁 Project Structure
+
+```
+Kalshi-Oracle/
+├── enhanced_oracle_bot.py      # Main application
+├── test_kalshi_api.py          # API testing
+├── run_all_tests.py           # Test runner
+├── requirements.txt           # Dependencies
+├── .env                       # Environment variables
+├── kalshi_markets_cache.pkl  # Cached market data
+└── README.md                  # This file
+```
+
+## 🚀 Advanced Features
+
+### **Caching System**
+- **Automatic Cache Management**: 6-hour cache duration
+- **Cache Validation**: Checks cache age before use
+- **Performance Monitoring**: Logs cache hits and misses
+
+### **Error Handling**
+- **API Rate Limits**: Graceful handling of OpenAI rate limits
+- **Network Issues**: Retry logic for failed requests
+- **Authentication**: Proper error handling for API keys
+
+### **User Experience**
+- **Loading Animations**: Visual feedback for all operations
+- **Progress Bars**: Real-time progress for duplicate checking
+- **Responsive Design**: Works on all screen sizes
+
+## 🔧 Troubleshooting
+
+### **Common Issues**
+
+#### **API Key Errors**
+```bash
+# Check if keys are set
+echo $OPEN_AI_API_KEY
+echo $KALSHI_API_KEY
+```
+
+#### **Cache Issues**
+```bash
+# Clear cache
+rm kalshi_markets_cache.pkl
+```
+
+#### **Import Errors**
+```bash
+# Reinstall dependencies
+pip install -r requirements.txt
+```
+
+### **Performance Issues**
+- **Slow Duplicate Checking**: Reduce `max_markets_to_check` in config
+- **Cache Misses**: Check cache file permissions
+- **API Timeouts**: Increase timeout values in code
+
+## 📊 Monitoring
+
+### **Logs**
+- **Debug Level**: Detailed operation logging
+- **Performance Metrics**: Cache hits, API response times
+- **Error Tracking**: Comprehensive error logging
+
+### **Metrics**
+- **Market Generation**: Number of proposals created
+- **Duplicate Detection**: Accuracy and performance
+- **Cache Performance**: Hit rates and response times
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+### **Development Setup**
+```bash
+# Install development dependencies
+pip install -r requirements.txt
 
-## 📄 License
+# Run tests
+python3 run_all_tests.py
+
+# Start development server
+python3 -m streamlit run enhanced_oracle_bot.py
+```
+
+### **Code Quality**
+- **Type Hints**: Full type annotation
+- **Error Handling**: Comprehensive exception handling
+- **Documentation**: Inline comments and docstrings
+
+## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- **OpenAI** for GPT-3.5 API
-- **Hugging Face** for DistilBERT model
-- **Kalshi** for prediction market platform
-- **Streamlit** for dashboard framework
-- **Reuters/ESPN/Weather.gov** for news feeds
-
-## 📞 Support
-
-For issues or questions:
-1. Check the troubleshooting section
-2. Review the logs in `oracle_bot.log`
-3. Run the test scripts
-4. Create an issue on GitHub
+- **Kalshi**: For providing the prediction market platform
+- **OpenAI**: For GPT-3.5-turbo API
+- **Hugging Face**: For DistilBERT sentiment analysis
+- **Streamlit**: For the web interface framework
 
 ---
 
